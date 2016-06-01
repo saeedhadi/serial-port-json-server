@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-type BufferflowMarlin struct {
+type BufferflowRepRap struct {
 	Name      string
 	Port      string
 	Paused    bool
@@ -35,11 +35,11 @@ type BufferflowMarlin struct {
 	rpt       *regexp.Regexp
 }
 
-func (b *BufferflowMarlin) Init() {
+func (b *BufferflowRepRap) Init() {
 	b.lock = &sync.Mutex{}
 	b.SetPaused(false, 1)
 
-	log.Println("Initting Marlin buffer flow")
+	log.Println("Initting RepRap buffer flow")
 	b.BufferMax = 127 //max buffer size 127 bytes available
 
 	b.q = NewQueue()
@@ -51,19 +51,19 @@ func (b *BufferflowMarlin) Init() {
 	b.reNewLine, _ = regexp.Compile("\\r{0,1}\\n{1,2}") //\\r{0,1}
 	b.ok, _ = regexp.Compile("^ok$")
 	b.err, _ = regexp.Compile("^error")
-	b.initline, _ = regexp.Compile("(^echo:Marlin|^Marlin)")
-	b.qry, _ = regexp.Compile("\\M114")
-	b.rpt, _ = regexp.Compile("^ok X:")
+	b.initline, _ = regexp.Compile("^(Smoothie|^echo:Marlin|^Marlin)")
+	b.qry, _ = regexp.Compile("\\?")
+	b.rpt, _ = regexp.Compile("^(ok C:|^ok X:)")
 
 	//initialize query loop
 	b.rptQueryLoop(b.parent_serport) // Disable the query loop
 }
 
-func (b *BufferflowMarlin) RewriteSerialData(cmd string, id string) string {
+func (b *BufferflowRepRap) RewriteSerialData(cmd string, id string) string {
 	return ""
 }
 
-func (b *BufferflowMarlin) BlockUntilReady(cmd string, id string) (bool, bool, string) {
+func (b *BufferflowRepRap) BlockUntilReady(cmd string, id string) (bool, bool, string) {
 	log.Printf("BlockUntilReady() start\n")
 
 	b.q.Push(cmd, id)
@@ -102,12 +102,12 @@ func (b *BufferflowMarlin) BlockUntilReady(cmd string, id string) (bool, bool, s
 	return true, true, ""
 }
 
-func (b *BufferflowMarlin) OnIncomingData(data string) {
+func (b *BufferflowRepRap) OnIncomingData(data string) {
 	log.Printf("OnIncomingData() start. data:%q\n", data)
 
 	b.LatestData += data
 
-	//it was found ok was only received with status responses until the Marlin buffer is full.
+	//it was found ok was only received with status responses until the RepRap buffer is full.
 	//b.LatestData = regexp.MustCompile(">\\r\\nok").ReplaceAllString(b.LatestData, ">") //remove oks from status responses
 
 	arrLines := b.reNewLine.Split(b.LatestData, -1)
@@ -161,7 +161,7 @@ func (b *BufferflowMarlin) OnIncomingData(data string) {
 
 			if b.q.LenOfCmds() < b.BufferMax {
 
-				log.Printf("Marlin just completed a line of gcode\n")
+				log.Printf("RepRap just completed a line of gcode\n")
 
 				// if we are paused, tell us to unpause cuz we have clean buffer room now
 				if b.GetPaused() {
@@ -169,13 +169,13 @@ func (b *BufferflowMarlin) OnIncomingData(data string) {
 				}
 			}
 
-			//check for the Marlin init line indicating the arduino is ready to accept commands
+			//check for the RepRap init line indicating the arduino is ready to accept commands
 			//could also pull version from this string, if we find a need for that later
 		} else if b.initline.MatchString(element) {
-			//Marlin init line received, clear anything from current buffer and unpause
+			//RepRap init line received, clear anything from current buffer and unpause
 			b.LocalBufferWipe(b.parent_serport)
 
-			//unpause buffer but wipe the command in the queue as Marlin has restarted.
+			//unpause buffer but wipe the command in the queue as RepRap has restarted.
 			if b.GetPaused() {
 				b.SetPaused(false, 2)
 			}
@@ -185,7 +185,7 @@ func (b *BufferflowMarlin) OnIncomingData(data string) {
 			//Check for report output, compare to last report output, if different return to client to update status; otherwise ignore status.
 		} else if b.rpt.MatchString(element) {
 			//if element == b.LastStatus {
-			//	log.Println("Marlin status has not changed, not reporting to client")
+			//	log.Println("RepRap status has not changed, not reporting to client")
 			//	continue //skip this element as the cnc position has not changed, and move on to the next element.
 			//}
 
@@ -210,7 +210,7 @@ func (b *BufferflowMarlin) OnIncomingData(data string) {
 }
 
 // Clean out b.sem so it can truly block
-func (b *BufferflowMarlin) ClearOutSemaphore() {
+func (b *BufferflowRepRap) ClearOutSemaphore() {
 	ctr := 0
 
 	keepLooping := true
@@ -231,7 +231,7 @@ func (b *BufferflowMarlin) ClearOutSemaphore() {
 	// ok, all b.sem signals are now consumed into la-la land
 }
 
-func (b *BufferflowMarlin) BreakApartCommands(cmd string) []string {
+func (b *BufferflowRepRap) BreakApartCommands(cmd string) []string {
 
 	// add newline after !~%
 	log.Printf("Command Before Break-Apart: %q\n", cmd)
@@ -244,7 +244,7 @@ func (b *BufferflowMarlin) BreakApartCommands(cmd string) []string {
 		item = regexp.MustCompile(";.*").ReplaceAllString(item, "")
 		item = strings.Replace(item, " ", "", -1)
 
-		if item == "*init*" { //return init string to update Marlin widget when already connected to Marlin
+		if item == "*init*" { //return init string to update RepRap widget when already connected to RepRap
 			m := DataPerLine{b.Port, b.version + "\n"}
 			bm, err := json.Marshal(m)
 			if err == nil {
@@ -256,12 +256,11 @@ func (b *BufferflowMarlin) BreakApartCommands(cmd string) []string {
 			if err == nil {
 				h.broadcastSys <- bm
 			}
-		} else if item == "M114" {
+		} else if item == "?" {
 			log.Printf("Query added without newline: %q\n", item)
-			s := item + "\n"
-			finalCmds = append(finalCmds, s) //append query request with newline character for reprap type firmwares
+			finalCmds = append(finalCmds, item) //append query request without newline character
 		} else if item == "%" {
-			log.Printf("Wiping Marlin BufferFlow")
+			log.Printf("Wiping RepRap BufferFlow")
 			b.LocalBufferWipe(b.parent_serport)
 			//dont add this command to the list of finalCmds
 		} else if item != "" {
@@ -278,30 +277,30 @@ func (b *BufferflowMarlin) BreakApartCommands(cmd string) []string {
 	//return []string{cmd} //do not process string
 }
 
-func (b *BufferflowMarlin) Pause() {
+func (b *BufferflowRepRap) Pause() {
 	b.SetPaused(true, 0)
 	//b.BypassMode = false // turn off bypassmode in case it's on
 	log.Println("Paused buffer on next BlockUntilReady() call")
 }
 
-func (b *BufferflowMarlin) Unpause() {
+func (b *BufferflowRepRap) Unpause() {
 	//unpause buffer by setting paused to false and passing a 1 to b.sem
 	b.SetPaused(false, 1)
 	log.Println("Unpaused buffer inside BlockUntilReady() call")
 }
 
-func (b *BufferflowMarlin) SeeIfSpecificCommandsShouldSkipBuffer(cmd string) bool {
+func (b *BufferflowRepRap) SeeIfSpecificCommandsShouldSkipBuffer(cmd string) bool {
 	// remove comments
 	//cmd = regexp.MustCompile("\\(.*?\\)").ReplaceAllString(cmd, "")
 	//cmd = regexp.MustCompile(";.*").ReplaceAllString(cmd, "")
-	if match, _ := regexp.MatchString("[!~\\M114]|(\u0018)", cmd); match {
+	if match, _ := regexp.MatchString("[!~\\?]|(\u0018)", cmd); match {
 		log.Printf("Found cmd that should skip buffer. cmd:%v\n", cmd)
 		return true
 	}
 	return false
 }
 
-func (b *BufferflowMarlin) SeeIfSpecificCommandsShouldPauseBuffer(cmd string) bool {
+func (b *BufferflowRepRap) SeeIfSpecificCommandsShouldPauseBuffer(cmd string) bool {
 	// remove comments
 	//cmd = regexp.MustCompile("\\(.*?\\)").ReplaceAllString(cmd, "")
 	//cmd = regexp.MustCompile(";.*").ReplaceAllString(cmd, "")
@@ -312,7 +311,7 @@ func (b *BufferflowMarlin) SeeIfSpecificCommandsShouldPauseBuffer(cmd string) bo
 	return false
 }
 
-func (b *BufferflowMarlin) SeeIfSpecificCommandsShouldUnpauseBuffer(cmd string) bool {
+func (b *BufferflowRepRap) SeeIfSpecificCommandsShouldUnpauseBuffer(cmd string) bool {
 
 	//cmd = regexp.MustCompile("\\(.*?\\)").ReplaceAllString(cmd, "")
 	//cmd = regexp.MustCompile(";.*").ReplaceAllString(cmd, "")
@@ -323,7 +322,7 @@ func (b *BufferflowMarlin) SeeIfSpecificCommandsShouldUnpauseBuffer(cmd string) 
 	return false
 }
 
-func (b *BufferflowMarlin) SeeIfSpecificCommandsShouldWipeBuffer(cmd string) bool {
+func (b *BufferflowRepRap) SeeIfSpecificCommandsShouldWipeBuffer(cmd string) bool {
 
 	//cmd = regexp.MustCompile("\\(.*?\\)").ReplaceAllString(cmd, "")
 	//cmd = regexp.MustCompile(";.*").ReplaceAllString(cmd, "")
@@ -338,7 +337,7 @@ func (b *BufferflowMarlin) SeeIfSpecificCommandsShouldWipeBuffer(cmd string) boo
 	return false
 }
 
-func (b *BufferflowMarlin) SeeIfSpecificCommandsReturnNoResponse(cmd string) bool {
+func (b *BufferflowRepRap) SeeIfSpecificCommandsReturnNoResponse(cmd string) bool {
 	/*
 		// remove comments
 		cmd = b.reComment.ReplaceAllString(cmd, "")
@@ -351,8 +350,8 @@ func (b *BufferflowMarlin) SeeIfSpecificCommandsReturnNoResponse(cmd string) boo
 	return false
 }
 
-func (b *BufferflowMarlin) ReleaseLock() {
-	log.Println("Lock being released in Marlin buffer")
+func (b *BufferflowRepRap) ReleaseLock() {
+	log.Println("Lock being released in RepRap buffer")
 
 	b.q.Delete()
 
@@ -362,15 +361,15 @@ func (b *BufferflowMarlin) ReleaseLock() {
 	b.SetPaused(false, 2)
 }
 
-func (b *BufferflowMarlin) IsBufferGloballySendingBackIncomingData() bool {
+func (b *BufferflowRepRap) IsBufferGloballySendingBackIncomingData() bool {
 	//telling json server that we are handling client responses
 	return true
 }
 
 //Use this function to open a connection, write directly to serial port and close connection.
-//This is used for sending query requests outside of the normal buffered operations that will pause to wait for room in the Marlin buffer
+//This is used for sending query requests outside of the normal buffered operations that will pause to wait for room in the RepRap buffer
 //'?' is asynchronous to the normal buffer load and does not need to be paused when buffer full
-func (b *BufferflowMarlin) rptQueryLoop(p *serport) {
+func (b *BufferflowRepRap) rptQueryLoop(p *serport) {
 	b.parent_serport = p //make note of this port for use in clearing the buffer later, on error.
 	ticker := time.NewTicker(2000 * time.Millisecond)
 	b.quit = make(chan int)
@@ -398,7 +397,7 @@ func (b *BufferflowMarlin) rptQueryLoop(p *serport) {
 	}()
 }
 
-func (b *BufferflowMarlin) Close() {
+func (b *BufferflowRepRap) Close() {
 	//stop the status query loop when the serial port is closed off.
 	log.Println("Stopping the status query loop")
 	b.quit <- 1
@@ -406,7 +405,7 @@ func (b *BufferflowMarlin) Close() {
 
 //	Gets the paused state of this buffer
 //	go-routine safe.
-func (b *BufferflowMarlin) GetPaused() bool {
+func (b *BufferflowRepRap) GetPaused() bool {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 	return b.Paused
@@ -414,7 +413,7 @@ func (b *BufferflowMarlin) GetPaused() bool {
 
 //	Sets the paused state of this buffer
 //	go-routine safe.
-func (b *BufferflowMarlin) SetPaused(isPaused bool, semRelease int) {
+func (b *BufferflowRepRap) SetPaused(isPaused bool, semRelease int) {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 	b.Paused = isPaused
@@ -432,8 +431,8 @@ func (b *BufferflowMarlin) SetPaused(isPaused bool, semRelease int) {
 }
 
 //local version of buffer wipe loop needed to handle pseudo clear buffer (%) without passing that value on to
-func (b *BufferflowMarlin) LocalBufferWipe(p *serport) {
-	log.Printf("Pseudo command received to wipe Marlin buffer but *not* send on to Marlin controller.")
+func (b *BufferflowRepRap) LocalBufferWipe(p *serport) {
+	log.Printf("Pseudo command received to wipe RepRap buffer but *not* send on to RepRap controller.")
 
 	// consume all stuff queued
 	func() {
@@ -465,9 +464,9 @@ func (b *BufferflowMarlin) LocalBufferWipe(p *serport) {
 	h.broadcastSys <- []byte("{\"Cmd\":\"WipedQueue\",\"QCnt\":" + strconv.Itoa(p.itemsInBuffer) + ",\"Port\":\"" + p.portConf.Name + "\"}")
 }
 
-func (b *BufferflowMarlin) GetManualPaused() bool {
+func (b *BufferflowRepRap) GetManualPaused() bool {
 	return false
 }
 
-func (b *BufferflowMarlin) SetManualPaused(isPaused bool) {
+func (b *BufferflowRepRap) SetManualPaused(isPaused bool) {
 }

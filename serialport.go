@@ -518,6 +518,20 @@ func spHandlerOpen(portname string, baud int, buftype string, isSecondary bool) 
 		bw.Init()
 		bw.Port = portname
 		p.bufferwatcher = bw
+	} else if buftype == "repetier" {
+		// marlin bufferflow
+		// store port as parent_serport for use in intializing a status query loop for '?'
+		bw := &BufferflowRepetier{Name: "repetier", parent_serport: p}
+		bw.Init()
+		bw.Port = portname
+		p.bufferwatcher = bw
+	}	else if buftype == "smoothie" {
+		// marlin bufferflow
+		// store port as parent_serport for use in intializing a status query loop for '?'
+		bw := &BufferflowSmoothie{Name: "smoothie", parent_serport: p}
+		bw.Init()
+		bw.Port = portname
+		p.bufferwatcher = bw
 	} else {
 		bw := &BufferflowDefault{}
 		bw.Init()
